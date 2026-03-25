@@ -3,7 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { FileText, Target, AlertTriangle, TrendingUp, ArrowUpRight, Loader2 } from "lucide-react";
+import { FileText, Target, AlertTriangle, TrendingUp, ArrowUpRight, Loader2, ShieldAlert } from "lucide-react";
 
 function formatBRL(value: number | null) {
   if (value == null) return "—";
@@ -46,16 +46,49 @@ export default function DashboardPage() {
     },
   });
 
+  const { data: documentos, isLoading: loadingDocs } = useQuery({
+    queryKey: ["documentos-dashboard"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("documentos")
+        .select("*");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const now = new Date();
+  const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+
+  const alertDocs = (documentos ?? []).filter((doc) => {
+    const venc = new Date(doc.data_vencimento);
+    return venc.getTime() < now.getTime() + thirtyDaysMs;
+  });
+
+  const expiredDocs = alertDocs.filter((doc) => new Date(doc.data_vencimento) < now);
+  const pendingDocs = alertDocs.filter((doc) => new Date(doc.data_vencimento) >= now);
+
+  const alertCount = alertDocs.length;
+  const docsOk = alertCount === 0 && !loadingDocs;
+
   const totalMatches = licitacoes?.length ?? 0;
   const avgScore = licitacoes?.length
     ? Math.round(licitacoes.reduce((s, l) => s + (l.score_match_ia ?? 0), 0) / licitacoes.length)
     : 0;
 
+  const isLoading = loadingLic || loadingEmp || loadingDocs;
+
   const statsCards = [
     { title: "Editais Recomendados", value: String(totalMatches), change: "Top 5 por score", icon: FileText, color: "text-accent" },
     { title: "Empresas Cadastradas", value: String(empresas ?? 0), change: "Perfis ativos", icon: Target, color: "text-success" },
     { title: "Score Médio IA", value: `${avgScore}%`, change: "Dos editais listados", icon: TrendingUp, color: "text-accent" },
-    { title: "Documentos Vencendo", value: "—", change: "Em breve", icon: AlertTriangle, color: "text-warning" },
+    {
+      title: "Documentos Vencendo",
+      value: docsOk ? "0" : String(alertCount),
+      change: docsOk ? "Tudo em dia" : `${expiredDocs.length} vencido(s), ${pendingDocs.length} próximo(s)`,
+      icon: AlertTriangle,
+      color: alertCount > 0 ? "text-destructive" : "text-success",
+    },
   ];
 
   return (
@@ -74,7 +107,9 @@ export default function DashboardPage() {
                 <stat.icon className={`h-4 w-4 ${stat.color}`} />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{loadingLic || loadingEmp ? "…" : stat.value}</div>
+                <div className={`text-2xl font-bold ${stat.title === "Documentos Vencendo" && alertCount > 0 ? "text-destructive" : ""}`}>
+                  {isLoading ? "…" : stat.value}
+                </div>
                 <p className="text-xs text-muted-foreground mt-1">{stat.change}</p>
               </CardContent>
             </Card>
@@ -122,12 +157,46 @@ export default function DashboardPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
-                <AlertTriangle className="h-4 w-4 text-warning" />
+                <AlertTriangle className={`h-4 w-4 ${alertCount > 0 ? "text-destructive" : "text-success"}`} />
                 Alertas de Documentos
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-sm text-muted-foreground text-center py-8">Conecte os documentos para ver alertas.</p>
+              {loadingDocs ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : alertDocs.length === 0 ? (
+                <div className="text-center py-8">
+                  <p className="text-sm text-success font-medium">✓ Tudo em dia</p>
+                  <p className="text-xs text-muted-foreground mt-1">Nenhum documento vencido ou próximo do vencimento.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {alertDocs.slice(0, 5).map((doc) => {
+                    const isExpired = new Date(doc.data_vencimento) < now;
+                    return (
+                      <div key={doc.id} className="flex items-start gap-2 p-2 rounded-md border bg-card">
+                        <ShieldAlert className={`h-4 w-4 mt-0.5 shrink-0 ${isExpired ? "text-destructive" : "text-warning"}`} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium truncate">{doc.nome_documento}</p>
+                          <p className="text-xs text-muted-foreground">
+                            Vence: {new Date(doc.data_vencimento).toLocaleDateString("pt-BR")}
+                          </p>
+                        </div>
+                        <Badge className={isExpired ? "bg-destructive text-destructive-foreground" : "bg-warning text-warning-foreground"}>
+                          {isExpired ? "Expirado" : "Vencendo"}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                  {alertDocs.length > 5 && (
+                    <p className="text-xs text-muted-foreground text-center pt-1">
+                      +{alertDocs.length - 5} documento(s) com alerta
+                    </p>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
