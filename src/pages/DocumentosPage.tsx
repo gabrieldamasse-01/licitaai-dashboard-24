@@ -1,37 +1,77 @@
 import { useState, useCallback } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FolderOpen, Upload, FileCheck, FileWarning, X } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { FolderOpen, Upload, FileCheck, FileWarning, X, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
-interface Documento {
-  id: number;
-  nome: string;
-  tipo: string;
-  vencimento: string;
-  status: "valid" | "expired" | "expiring";
+function getDocStatus(dataVencimento: string): "valid" | "pending" | "expired" {
+  if (!dataVencimento) return "pending";
+  const venc = new Date(dataVencimento);
+  const now = new Date();
+  const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+  if (venc < now) return "expired";
+  if (venc.getTime() - now.getTime() < thirtyDays) return "pending";
+  return "valid";
 }
-
-const initialDocs: Documento[] = [
-  { id: 1, nome: "CND Federal", tipo: "Certidão", vencimento: "15/08/2026", status: "valid" },
-  { id: 2, nome: "Certidão FGTS", tipo: "Certidão", vencimento: "02/04/2026", status: "expiring" },
-  { id: 3, nome: "Contrato Social", tipo: "Documento", vencimento: "—", status: "valid" },
-  { id: 4, nome: "Atestado de Capacidade Técnica", tipo: "Atestado", vencimento: "15/01/2026", status: "expired" },
-  { id: 5, nome: "Certidão Negativa Estadual", tipo: "Certidão", vencimento: "20/09/2026", status: "valid" },
-  { id: 6, nome: "Balanço Patrimonial 2025", tipo: "Financeiro", vencimento: "31/12/2026", status: "valid" },
-];
 
 const statusConfig = {
   valid: { label: "Válido", className: "bg-success text-success-foreground" },
-  expiring: { label: "Vencendo", className: "border-warning text-warning" },
+  pending: { label: "Pendente", className: "bg-warning text-warning-foreground" },
   expired: { label: "Expirado", className: "bg-destructive text-destructive-foreground" },
 };
 
 export default function DocumentosPage() {
-  const [docs] = useState<Documento[]>(initialDocs);
+  const queryClient = useQueryClient();
   const [dragActive, setDragActive] = useState(false);
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [nomeDocumento, setNomeDocumento] = useState("");
+  const [empresaId, setEmpresaId] = useState("");
+  const [dataVencimento, setDataVencimento] = useState("");
+  const [uploading, setUploading] = useState(false);
+
+  // Fetch empresas for the select
+  const { data: empresas } = useQuery({
+    queryKey: ["empresas"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("empresas").select("id, nome_fantasia").order("nome_fantasia");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  // Fetch documentos with empresa name
+  const { data: documentos, isLoading } = useQuery({
+    queryKey: ["documentos"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("documentos")
+        .select("*, empresas(nome_fantasia)")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -43,24 +83,71 @@ export default function DocumentosPage() {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    const files = Array.from(e.dataTransfer.files);
-    setUploadedFiles((prev) => [...prev, ...files.map((f) => f.name)]);
-  }, []);
+    const file = e.dataTransfer.files[0];
+    if (file?.type === "application/pdf") {
+      setSelectedFile(file);
+      if (!nomeDocumento) setNomeDocumento(file.name.replace(".pdf", ""));
+    } else {
+      toast.error("Apenas arquivos PDF são aceitos.");
+    }
+  }, [nomeDocumento]);
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const files = Array.from(e.target.files);
-      setUploadedFiles((prev) => [...prev, ...files.map((f) => f.name)]);
+    const file = e.target.files?.[0];
+    if (file?.type === "application/pdf") {
+      setSelectedFile(file);
+      if (!nomeDocumento) setNomeDocumento(file.name.replace(".pdf", ""));
+    } else {
+      toast.error("Apenas arquivos PDF são aceitos.");
     }
   };
 
-  const removeUploaded = (name: string) => {
-    setUploadedFiles((prev) => prev.filter((f) => f !== name));
+  const handleUpload = async () => {
+    if (!selectedFile || !nomeDocumento || !empresaId || !dataVencimento) {
+      toast.error("Preencha todos os campos e selecione um arquivo.");
+      return;
+    }
+
+    setUploading(true);
+    try {
+      // Upload file to storage
+      const filePath = `${empresaId}/${Date.now()}_${selectedFile.name}`;
+      const { error: storageError } = await supabase.storage
+        .from("documentos")
+        .upload(filePath, selectedFile, { contentType: "application/pdf" });
+
+      if (storageError) throw storageError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage.from("documentos").getPublicUrl(filePath);
+
+      // Insert record in database
+      const { error: dbError } = await supabase.from("documentos").insert({
+        nome_documento: nomeDocumento,
+        empresa_id: empresaId,
+        data_vencimento: dataVencimento,
+        url_arquivo: urlData.publicUrl,
+        status: getDocStatus(dataVencimento),
+      });
+
+      if (dbError) throw dbError;
+
+      toast.success("Documento enviado com sucesso!");
+      setSelectedFile(null);
+      setNomeDocumento("");
+      setEmpresaId("");
+      setDataVencimento("");
+      queryClient.invalidateQueries({ queryKey: ["documentos"] });
+    } catch (err: any) {
+      toast.error("Erro ao enviar: " + err.message);
+    } finally {
+      setUploading(false);
+    }
   };
 
-  const validCount = docs.filter((d) => d.status === "valid").length;
-  const expiringCount = docs.filter((d) => d.status === "expiring").length;
-  const expiredCount = docs.filter((d) => d.status === "expired").length;
+  const validCount = documentos?.filter((d) => getDocStatus(d.data_vencimento) === "valid").length ?? 0;
+  const pendingCount = documentos?.filter((d) => getDocStatus(d.data_vencimento) === "pending").length ?? 0;
+  const expiredCount = documentos?.filter((d) => getDocStatus(d.data_vencimento) === "expired").length ?? 0;
 
   return (
     <DashboardLayout>
@@ -85,8 +172,8 @@ export default function DocumentosPage() {
             <CardContent className="flex items-center gap-3 pt-6">
               <FileWarning className="h-8 w-8 text-warning" />
               <div>
-                <p className="text-2xl font-bold">{expiringCount}</p>
-                <p className="text-sm text-muted-foreground">Vencendo</p>
+                <p className="text-2xl font-bold">{pendingCount}</p>
+                <p className="text-sm text-muted-foreground">Pendentes</p>
               </div>
             </CardContent>
           </Card>
@@ -106,46 +193,97 @@ export default function DocumentosPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Upload className="h-4 w-4 text-accent" />
-              Upload de Documentos
+              Upload de Documento (PDF)
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <div
-              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
+              className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer ${
                 dragActive ? "border-accent bg-accent/5" : "border-border"
               }`}
               onDragEnter={handleDrag}
               onDragLeave={handleDrag}
               onDragOver={handleDrag}
               onDrop={handleDrop}
+              onClick={() => document.getElementById("file-upload")?.click()}
             >
               <Upload className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
-              <p className="text-sm font-medium">Arraste e solte arquivos aqui</p>
-              <p className="text-xs text-muted-foreground mt-1">ou clique para selecionar</p>
+              {selectedFile ? (
+                <div className="flex items-center justify-center gap-2">
+                  <span className="text-sm font-medium">{selectedFile.name}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6"
+                    onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}
+                  >
+                    <X className="h-3 w-3" />
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm font-medium">Arraste e solte um PDF aqui</p>
+                  <p className="text-xs text-muted-foreground mt-1">ou clique para selecionar</p>
+                </>
+              )}
               <input
                 type="file"
-                multiple
+                accept="application/pdf"
                 className="hidden"
                 id="file-upload"
                 onChange={handleFileInput}
               />
-              <Button variant="outline" className="mt-4" onClick={() => document.getElementById("file-upload")?.click()}>
-                Selecionar Arquivos
-              </Button>
             </div>
 
-            {uploadedFiles.length > 0 && (
-              <div className="mt-4 space-y-2">
-                {uploadedFiles.map((file) => (
-                  <div key={file} className="flex items-center justify-between p-2 rounded border bg-muted/50">
-                    <span className="text-sm">{file}</span>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeUploaded(file)}>
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ))}
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-2">
+                <Label htmlFor="nome-doc">Nome do Documento</Label>
+                <Input
+                  id="nome-doc"
+                  placeholder="Ex: CND Federal"
+                  value={nomeDocumento}
+                  onChange={(e) => setNomeDocumento(e.target.value)}
+                />
               </div>
-            )}
+              <div className="space-y-2">
+                <Label>Empresa</Label>
+                <Select value={empresaId} onValueChange={setEmpresaId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione a empresa" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {empresas?.map((e) => (
+                      <SelectItem key={e.id} value={e.id}>
+                        {e.nome_fantasia}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="vencimento">Data de Vencimento</Label>
+                <Input
+                  id="vencimento"
+                  type="date"
+                  value={dataVencimento}
+                  onChange={(e) => setDataVencimento(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <Button onClick={handleUpload} disabled={uploading || !selectedFile}>
+              {uploading ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Enviando...
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4" />
+                  Enviar Documento
+                </>
+              )}
+            </Button>
           </CardContent>
         </Card>
 
@@ -154,32 +292,64 @@ export default function DocumentosPage() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <FolderOpen className="h-4 w-4 text-accent" />
-              Certidões e Documentos
+              Documentos Salvos
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2">
-              {docs.map((doc) => {
-                const config = statusConfig[doc.status];
-                return (
-                  <div key={doc.id} className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <FolderOpen className="h-4 w-4 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm font-medium">{doc.nome}</p>
-                        <p className="text-xs text-muted-foreground">{doc.tipo} · Vence: {doc.vencimento}</p>
-                      </div>
-                    </div>
-                    <Badge
-                      variant={doc.status === "expiring" ? "outline" : "default"}
-                      className={config.className}
-                    >
-                      {config.label}
-                    </Badge>
-                  </div>
-                );
-              })}
-            </div>
+            {isLoading ? (
+              <div className="flex justify-center py-8">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            ) : !documentos?.length ? (
+              <p className="text-sm text-muted-foreground text-center py-8">
+                Nenhum documento cadastrado ainda.
+              </p>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Documento</TableHead>
+                    <TableHead>Empresa</TableHead>
+                    <TableHead>Vencimento</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {documentos.map((doc) => {
+                    const status = getDocStatus(doc.data_vencimento);
+                    const config = statusConfig[status];
+                    const empresaNome = (doc as any).empresas?.nome_fantasia ?? "—";
+                    return (
+                      <TableRow key={doc.id}>
+                        <TableCell className="font-medium">{doc.nome_documento}</TableCell>
+                        <TableCell>{empresaNome}</TableCell>
+                        <TableCell>
+                          {new Date(doc.data_vencimento).toLocaleDateString("pt-BR")}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={status === "pending" ? "outline" : "default"}
+                            className={config.className}
+                          >
+                            {config.label}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {doc.url_arquivo && (
+                            <Button variant="ghost" size="sm" asChild>
+                              <a href={doc.url_arquivo} target="_blank" rel="noopener noreferrer">
+                                Ver PDF
+                              </a>
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </div>
