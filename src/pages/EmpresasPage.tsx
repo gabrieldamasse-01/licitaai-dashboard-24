@@ -1,80 +1,81 @@
 import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Building2, Plus, Pencil, Trash2, Search } from "lucide-react";
-
-interface Empresa {
-  id: number;
-  razaoSocial: string;
-  cnpj: string;
-  segmento: string;
-  porte: string;
-  status: "active" | "inactive";
-}
-
-const initialEmpresas: Empresa[] = [
-  { id: 1, razaoSocial: "Tech Solutions Ltda", cnpj: "12.345.678/0001-90", segmento: "Tecnologia", porte: "Médio", status: "active" },
-  { id: 2, razaoSocial: "Construtora Alpha S.A.", cnpj: "98.765.432/0001-10", segmento: "Construção Civil", porte: "Grande", status: "active" },
-  { id: 3, razaoSocial: "MedSupply Comércio", cnpj: "11.222.333/0001-44", segmento: "Saúde", porte: "Pequeno", status: "inactive" },
-  { id: 4, razaoSocial: "LogiTrans Transportes", cnpj: "55.666.777/0001-88", segmento: "Logística", porte: "Médio", status: "active" },
-];
+import { Building2, Plus, Pencil, Trash2, Search, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 export default function EmpresasPage() {
-  const [empresas, setEmpresas] = useState<Empresa[]>(initialEmpresas);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [editing, setEditing] = useState<Empresa | null>(null);
-  const [form, setForm] = useState({ razaoSocial: "", cnpj: "", segmento: "", porte: "" });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({ nome_fantasia: "", cnpj: "", setor_atuacao: "", cnae_principal: "" });
 
-  const filtered = empresas.filter((e) =>
-    e.razaoSocial.toLowerCase().includes(search.toLowerCase()) ||
-    e.cnpj.includes(search)
-  );
+  const { data: empresas, isLoading } = useQuery({
+    queryKey: ["empresas"],
+    queryFn: async () => {
+      const { data, error } = await supabase.from("empresas").select("*").order("created_at", { ascending: false });
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const upsert = useMutation({
+    mutationFn: async () => {
+      if (editingId) {
+        const { error } = await supabase.from("empresas").update(form).eq("id", editingId);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("empresas").insert(form);
+        if (error) throw error;
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["empresas"] });
+      setDialogOpen(false);
+      toast.success(editingId ? "Empresa atualizada!" : "Empresa cadastrada!");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.from("empresas").delete().eq("id", id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["empresas"] });
+      toast.success("Empresa removida.");
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
 
   const openNew = () => {
-    setEditing(null);
-    setForm({ razaoSocial: "", cnpj: "", segmento: "", porte: "" });
+    setEditingId(null);
+    setForm({ nome_fantasia: "", cnpj: "", setor_atuacao: "", cnae_principal: "" });
     setDialogOpen(true);
   };
 
-  const openEdit = (e: Empresa) => {
-    setEditing(e);
-    setForm({ razaoSocial: e.razaoSocial, cnpj: e.cnpj, segmento: e.segmento, porte: e.porte });
+  const openEdit = (e: NonNullable<typeof empresas>[number]) => {
+    setEditingId(e.id);
+    setForm({ nome_fantasia: e.nome_fantasia, cnpj: e.cnpj, setor_atuacao: e.setor_atuacao ?? "", cnae_principal: e.cnae_principal ?? "" });
     setDialogOpen(true);
   };
 
-  const save = () => {
-    if (editing) {
-      setEmpresas((prev) => prev.map((e) => (e.id === editing.id ? { ...e, ...form } : e)));
-    } else {
-      setEmpresas((prev) => [...prev, { id: Date.now(), ...form, status: "active" as const }]);
-    }
-    setDialogOpen(false);
-  };
-
-  const remove = (id: number) => {
-    setEmpresas((prev) => prev.filter((e) => e.id !== id));
-  };
+  const filtered = (empresas ?? []).filter((e) =>
+    e.nome_fantasia.toLowerCase().includes(search.toLowerCase()) || e.cnpj.includes(search)
+  );
 
   return (
     <DashboardLayout>
@@ -86,18 +87,16 @@ export default function EmpresasPage() {
           </div>
           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogTrigger asChild>
-              <Button onClick={openNew}>
-                <Plus className="h-4 w-4 mr-2" /> Nova Empresa
-              </Button>
+              <Button onClick={openNew}><Plus className="h-4 w-4 mr-2" /> Nova Empresa</Button>
             </DialogTrigger>
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>{editing ? "Editar Empresa" : "Nova Empresa"}</DialogTitle>
+                <DialogTitle>{editingId ? "Editar Empresa" : "Nova Empresa"}</DialogTitle>
               </DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid gap-2">
-                  <Label>Razão Social</Label>
-                  <Input value={form.razaoSocial} onChange={(e) => setForm({ ...form, razaoSocial: e.target.value })} />
+                  <Label>Nome Fantasia</Label>
+                  <Input value={form.nome_fantasia} onChange={(e) => setForm({ ...form, nome_fantasia: e.target.value })} />
                 </div>
                 <div className="grid gap-2">
                   <Label>CNPJ</Label>
@@ -105,18 +104,21 @@ export default function EmpresasPage() {
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="grid gap-2">
-                    <Label>Segmento</Label>
-                    <Input value={form.segmento} onChange={(e) => setForm({ ...form, segmento: e.target.value })} />
+                    <Label>Setor de Atuação</Label>
+                    <Input value={form.setor_atuacao} onChange={(e) => setForm({ ...form, setor_atuacao: e.target.value })} />
                   </div>
                   <div className="grid gap-2">
-                    <Label>Porte</Label>
-                    <Input value={form.porte} onChange={(e) => setForm({ ...form, porte: e.target.value })} />
+                    <Label>CNAE Principal</Label>
+                    <Input value={form.cnae_principal} onChange={(e) => setForm({ ...form, cnae_principal: e.target.value })} />
                   </div>
                 </div>
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-                <Button onClick={save}>Salvar</Button>
+                <Button onClick={() => upsert.mutate()} disabled={upsert.isPending}>
+                  {upsert.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Salvar
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -130,52 +132,44 @@ export default function EmpresasPage() {
               <div className="flex-1" />
               <div className="relative w-64">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por nome ou CNPJ..."
-                  className="pl-9"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
+                <Input placeholder="Buscar por nome ou CNPJ..." className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
               </div>
             </div>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Razão Social</TableHead>
-                  <TableHead>CNPJ</TableHead>
-                  <TableHead>Segmento</TableHead>
-                  <TableHead>Porte</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((empresa) => (
-                  <TableRow key={empresa.id}>
-                    <TableCell className="font-medium">{empresa.razaoSocial}</TableCell>
-                    <TableCell className="text-muted-foreground">{empresa.cnpj}</TableCell>
-                    <TableCell>{empresa.segmento}</TableCell>
-                    <TableCell>{empresa.porte}</TableCell>
-                    <TableCell>
-                      <Badge variant={empresa.status === "active" ? "default" : "secondary"}
-                        className={empresa.status === "active" ? "bg-success text-success-foreground" : ""}>
-                        {empresa.status === "active" ? "Ativo" : "Inativo"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="ghost" size="icon" onClick={() => openEdit(empresa)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" onClick={() => remove(empresa.id)}>
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </TableCell>
+            {isLoading ? (
+              <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nome Fantasia</TableHead>
+                    <TableHead>CNPJ</TableHead>
+                    <TableHead>Setor</TableHead>
+                    <TableHead>CNAE</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((empresa) => (
+                    <TableRow key={empresa.id}>
+                      <TableCell className="font-medium">{empresa.nome_fantasia}</TableCell>
+                      <TableCell className="text-muted-foreground">{empresa.cnpj}</TableCell>
+                      <TableCell>{empresa.setor_atuacao ?? "—"}</TableCell>
+                      <TableCell>{empresa.cnae_principal ?? "—"}</TableCell>
+                      <TableCell className="text-right">
+                        <Button variant="ghost" size="icon" onClick={() => openEdit(empresa)}>
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => deleteMut.mutate(empresa.id)}>
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         </Card>
       </div>

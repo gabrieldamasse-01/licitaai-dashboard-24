@@ -1,69 +1,63 @@
+import { useQuery } from "@tanstack/react-query";
+import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DashboardLayout } from "@/components/DashboardLayout";
-import { FileText, Target, AlertTriangle, TrendingUp, ArrowUpRight } from "lucide-react";
+import { FileText, Target, AlertTriangle, TrendingUp, ArrowUpRight, Loader2 } from "lucide-react";
 
-const statsCards = [
-  {
-    title: "Editais Recomendados",
-    value: "24",
-    change: "+8 esta semana",
-    icon: FileText,
-    color: "text-accent" as const,
-  },
-  {
-    title: "Total de Matches",
-    value: "156",
-    change: "+12% vs mês anterior",
-    icon: Target,
-    color: "text-success" as const,
-  },
-  {
-    title: "Documentos Vencendo",
-    value: "3",
-    change: "Próximos 30 dias",
-    icon: AlertTriangle,
-    color: "text-warning" as const,
-  },
-  {
-    title: "Taxa de Conversão",
-    value: "18%",
-    change: "+3.2% vs mês anterior",
-    icon: TrendingUp,
-    color: "text-accent" as const,
-  },
-];
+function formatBRL(value: number | null) {
+  if (value == null) return "—";
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value);
+}
 
-const recentMatches = [
-  { id: 1, title: "Pregão Eletrônico - Serviços de TI", orgao: "Ministério da Saúde", score: 95, valor: "R$ 2.400.000", prazo: "15/04/2026" },
-  { id: 2, title: "Concorrência - Obras de Infraestrutura", orgao: "DNIT", score: 88, valor: "R$ 8.700.000", prazo: "22/04/2026" },
-  { id: 3, title: "Tomada de Preços - Material Hospitalar", orgao: "Hospital das Clínicas", score: 82, valor: "R$ 450.000", prazo: "10/04/2026" },
-  { id: 4, title: "Pregão Presencial - Equipamentos", orgao: "Prefeitura de SP", score: 76, valor: "R$ 1.200.000", prazo: "28/04/2026" },
-  { id: 5, title: "RDC - Construção Civil", orgao: "CEF", score: 71, valor: "R$ 15.000.000", prazo: "05/05/2026" },
-];
-
-const alertsDocs = [
-  { nome: "CND Federal", vencimento: "02/04/2026", status: "expiring" },
-  { nome: "Certidão FGTS", vencimento: "10/04/2026", status: "expiring" },
-  { nome: "Atestado de Capacidade Técnica", vencimento: "28/04/2026", status: "expiring" },
-];
-
-function ScoreBadge({ score }: { score: number }) {
-  const variant = score >= 90 ? "default" : score >= 75 ? "secondary" : "outline";
-  return (
-    <Badge variant={variant} className={
-      score >= 90
-        ? "bg-success text-success-foreground"
-        : score >= 75
-        ? "bg-accent text-accent-foreground"
-        : ""
-    }>
-      {score}% match
-    </Badge>
-  );
+function ScoreBadge({ score }: { score: number | null }) {
+  if (score == null) return <Badge variant="outline">N/A</Badge>;
+  const cls =
+    score > 80
+      ? "bg-success text-success-foreground"
+      : score > 50
+      ? "bg-warning text-warning-foreground"
+      : "bg-destructive text-destructive-foreground";
+  return <Badge className={cls}>{score}% match</Badge>;
 }
 
 export default function DashboardPage() {
+  const { data: licitacoes, isLoading: loadingLic } = useQuery({
+    queryKey: ["licitacoes-dashboard"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("licitacoes")
+        .select("*")
+        .order("score_match_ia", { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      return data;
+    },
+  });
+
+  const { data: empresas, isLoading: loadingEmp } = useQuery({
+    queryKey: ["empresas-count"],
+    queryFn: async () => {
+      const { count, error } = await supabase
+        .from("empresas")
+        .select("*", { count: "exact", head: true });
+      if (error) throw error;
+      return count ?? 0;
+    },
+  });
+
+  const totalMatches = licitacoes?.length ?? 0;
+  const avgScore = licitacoes?.length
+    ? Math.round(licitacoes.reduce((s, l) => s + (l.score_match_ia ?? 0), 0) / licitacoes.length)
+    : 0;
+
+  const statsCards = [
+    { title: "Editais Recomendados", value: String(totalMatches), change: "Top 5 por score", icon: FileText, color: "text-accent" },
+    { title: "Empresas Cadastradas", value: String(empresas ?? 0), change: "Perfis ativos", icon: Target, color: "text-success" },
+    { title: "Score Médio IA", value: `${avgScore}%`, change: "Dos editais listados", icon: TrendingUp, color: "text-accent" },
+    { title: "Documentos Vencendo", value: "—", change: "Em breve", icon: AlertTriangle, color: "text-warning" },
+  ];
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -72,7 +66,6 @@ export default function DashboardPage() {
           <p className="text-muted-foreground">Visão geral das licitações e oportunidades.</p>
         </div>
 
-        {/* Stats Cards */}
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {statsCards.map((stat) => (
             <Card key={stat.title} className="gradient-card">
@@ -81,7 +74,7 @@ export default function DashboardPage() {
                 <stat.icon className={`h-4 w-4 ${stat.color}`} />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stat.value}</div>
+                <div className="text-2xl font-bold">{loadingLic || loadingEmp ? "…" : stat.value}</div>
                 <p className="text-xs text-muted-foreground mt-1">{stat.change}</p>
               </CardContent>
             </Card>
@@ -89,7 +82,6 @@ export default function DashboardPage() {
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
-          {/* Recent Matches */}
           <Card className="lg:col-span-2">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -98,25 +90,35 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {recentMatches.map((match) => (
-                  <div key={match.id} className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors cursor-pointer group">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm truncate group-hover:text-accent transition-colors">{match.title}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{match.orgao} · Prazo: {match.prazo}</p>
+              {loadingLic ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : !licitacoes?.length ? (
+                <p className="text-sm text-muted-foreground text-center py-8">Nenhuma licitação encontrada.</p>
+              ) : (
+                <div className="space-y-3">
+                  {licitacoes.map((lic) => (
+                    <div key={lic.id} className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-muted/50 transition-colors cursor-pointer group">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-sm truncate group-hover:text-accent transition-colors">{lic.titulo}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {lic.orgao_publico ?? "Órgão não informado"}
+                          {lic.data_abertura && ` · ${new Date(lic.data_abertura).toLocaleDateString("pt-BR")}`}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 ml-4 shrink-0">
+                        <span className="text-sm font-medium">{formatBRL(lic.valor_estimado)}</span>
+                        <ScoreBadge score={lic.score_match_ia} />
+                        <ArrowUpRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+                      </div>
                     </div>
-                    <div className="flex items-center gap-3 ml-4 shrink-0">
-                      <span className="text-sm font-medium">{match.valor}</span>
-                      <ScoreBadge score={match.score} />
-                      <ArrowUpRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                    </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
 
-          {/* Document Alerts */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
@@ -125,19 +127,7 @@ export default function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                {alertsDocs.map((doc) => (
-                  <div key={doc.nome} className="flex items-center justify-between p-3 rounded-lg border">
-                    <div>
-                      <p className="text-sm font-medium">{doc.nome}</p>
-                      <p className="text-xs text-muted-foreground">Vence em {doc.vencimento}</p>
-                    </div>
-                    <Badge variant="outline" className="border-warning text-warning text-xs">
-                      Vencendo
-                    </Badge>
-                  </div>
-                ))}
-              </div>
+              <p className="text-sm text-muted-foreground text-center py-8">Conecte os documentos para ver alertas.</p>
             </CardContent>
           </Card>
         </div>
