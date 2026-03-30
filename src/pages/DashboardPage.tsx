@@ -23,6 +23,10 @@ function ScoreBadge({ score }: { score: number | null }) {
 }
 
 export default function DashboardPage() {
+  useRealtimeSubscription("licitacoes", [["licitacoes-dashboard"]]);
+  useRealtimeSubscription("documentos", [["documentos-dashboard"]]);
+  useRealtimeSubscription("empresas", [["empresas-count"]]);
+
   const { data: licitacoes, isLoading: loadingLic } = useQuery({
     queryKey: ["licitacoes-dashboard"],
     queryFn: async () => {
