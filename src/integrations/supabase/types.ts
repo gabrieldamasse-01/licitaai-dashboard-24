@@ -17,7 +17,7 @@ export type Database = {
       documentos: {
         Row: {
           created_at: string | null
-          data_vencimento: string
+          data_vencimento: string | null
           empresa_id: string | null
           id: string
           nome_documento: string
@@ -26,7 +26,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
-          data_vencimento: string
+          data_vencimento?: string | null
           empresa_id?: string | null
           id?: string
           nome_documento: string
@@ -35,7 +35,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
-          data_vencimento?: string
+          data_vencimento?: string | null
           empresa_id?: string | null
           id?: string
           nome_documento?: string
