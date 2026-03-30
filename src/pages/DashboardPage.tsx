@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { DashboardLayout } from "@/components/DashboardLayout";
 import { FileText, Target, AlertTriangle, TrendingUp, ArrowUpRight, Loader2, ShieldAlert } from "lucide-react";
+import { useRealtimeSubscription } from "@/hooks/useRealtimeSubscription";
 
 function formatBRL(value: number | null) {
   if (value == null) return "—";
