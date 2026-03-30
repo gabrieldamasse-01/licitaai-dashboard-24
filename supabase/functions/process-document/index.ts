@@ -47,10 +47,33 @@ serve(async (req) => {
   }
 
   try {
-    const { record } = await req.json();
+    // Validate webhook secret to ensure request comes from Supabase
+    const webhookSecret = Deno.env.get("WEBHOOK_SECRET");
+    if (webhookSecret) {
+      const authHeader = req.headers.get("authorization");
+      if (!authHeader || authHeader !== `Bearer ${webhookSecret}`) {
+        console.error("Unauthorized webhook call - invalid or missing secret");
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
-    if (!record?.id) {
-      return new Response(JSON.stringify({ error: "No record provided" }), {
+    const body = await req.json();
+    const record = body?.record;
+
+    if (!record?.id || typeof record.id !== "string") {
+      return new Response(JSON.stringify({ error: "No valid record provided" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Validate record.id is a valid UUID format
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(record.id)) {
+      return new Response(JSON.stringify({ error: "Invalid record ID format" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
