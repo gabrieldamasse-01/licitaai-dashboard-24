@@ -69,7 +69,7 @@ serve(async (req: Request) => {
       let page = 0;
       let totalPages = 1;
 
-      while (page < totalPages && page < 10) {
+      while (page < totalPages && page < 3) {  // Max 3 pages per chunk to avoid timeout
         try {
           const resp = await fetch(EFFECTI_API, {
             method: "POST",
