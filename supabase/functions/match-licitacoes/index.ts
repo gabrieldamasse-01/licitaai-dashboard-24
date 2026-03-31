@@ -256,17 +256,12 @@ serve(async (req: Request) => {
           }
         }
 
-        if (upsertError) {
-          console.error(`Upsert error for ${lic.idLicitacao}:`, upsertError.message);
-        } else {
-          savedCount++;
-          results.push({
-            id: lic.idLicitacao,
-            titulo: (lic.objetoSemTags || "").substring(0, 80),
-            score: bestScore,
-            empresa_match: bestEmpresa.nome,
-          });
-        }
+        results.push({
+          id: lic.idLicitacao,
+          titulo: (lic.objetoSemTags || "").substring(0, 80),
+          score: bestScore,
+          empresa_match: bestEmpresa.nome,
+        });
       }
     }
 
