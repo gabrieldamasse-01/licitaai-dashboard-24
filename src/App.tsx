@@ -9,6 +9,7 @@ import DocumentosPage from "./pages/DocumentosPage";
 import MatchesPage from "./pages/MatchesPage";
 import ConfiguracoesPage from "./pages/ConfiguracoesPage";
 import NotFound from "./pages/NotFound";
+import { HeroSection } from "./components/blocks/hero-section-1";
 
 const queryClient = new QueryClient();
 
