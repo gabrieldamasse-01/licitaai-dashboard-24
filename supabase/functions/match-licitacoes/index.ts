@@ -194,7 +194,7 @@ serve(async (req: Request) => {
       }
 
       // Save if score is > 10 (lower threshold for more results)
-      if (bestScore > 20) {
+      if (bestScore > 10) {
         // If AI key available, refine score with AI for high potential matches
         if (AI_API_KEY && bestScore > 40) {
           try {
