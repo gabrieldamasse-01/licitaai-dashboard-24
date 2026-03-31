@@ -218,31 +218,50 @@ serve(async (req: Request) => {
           } catch { /* ignore */ }
         }
 
-        // Upsert to Supabase
-        const { error: upsertError } = await supabase.from("licitacoes").upsert(
-          {
+        // Upsert to Supabase (uses unique index on link_edital)
+        const linkEdital = lic.url || null;
+        if (!linkEdital) {
+          // No URL, use INSERT
+          const { error: insertError } = await supabase.from("licitacoes").insert({
             titulo: (lic.objetoSemTags || lic.objeto || "Sem título").substring(0, 500),
             orgao_publico: lic.orgao || null,
             valor_estimado: valor || null,
             score_match_ia: bestScore,
-            link_edital: lic.url || null,
+            link_edital: null,
             data_abertura: dataAbertura,
             status_processo: "aberto",
-          },
-          { onConflict: "titulo", ignoreDuplicates: true }
-        );
-
-        if (upsertError) {
-          console.error(`Upsert error for ${lic.idLicitacao}:`, upsertError.message);
-        } else {
-          savedCount++;
-          results.push({
-            id: lic.idLicitacao,
-            titulo: (lic.objetoSemTags || "").substring(0, 80),
-            score: bestScore,
-            empresa_match: bestEmpresa.nome,
           });
+          if (insertError) {
+            console.error(`Insert error for ${lic.idLicitacao}:`, insertError.message);
+          } else {
+            savedCount++;
+          }
+        } else {
+          const { error: upsertError } = await supabase.from("licitacoes").upsert(
+            {
+              titulo: (lic.objetoSemTags || lic.objeto || "Sem título").substring(0, 500),
+              orgao_publico: lic.orgao || null,
+              valor_estimado: valor || null,
+              score_match_ia: bestScore,
+              link_edital: linkEdital,
+              data_abertura: dataAbertura,
+              status_processo: "aberto",
+            },
+            { onConflict: "link_edital", ignoreDuplicates: true }
+          );
+          if (upsertError) {
+            console.error(`Upsert error for ${lic.idLicitacao}:`, upsertError.message);
+          } else {
+            savedCount++;
+          }
         }
+
+        results.push({
+          id: lic.idLicitacao,
+          titulo: (lic.objetoSemTags || "").substring(0, 80),
+          score: bestScore,
+          empresa_match: bestEmpresa.nome,
+        });
       }
     }
 
