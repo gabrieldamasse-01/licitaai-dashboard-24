@@ -9,6 +9,7 @@ import DocumentosPage from "./pages/DocumentosPage";
 import MatchesPage from "./pages/MatchesPage";
 import ConfiguracoesPage from "./pages/ConfiguracoesPage";
 import NotFound from "./pages/NotFound";
+import { HeroSection } from "./components/blocks/hero-section-1";
 
 const queryClient = new QueryClient();
 
@@ -24,6 +25,7 @@ const App = () => (
           <Route path="/documentos" element={<DocumentosPage />} />
           <Route path="/matches" element={<MatchesPage />} />
           <Route path="/configuracoes" element={<ConfiguracoesPage />} />
+          <Route path="/landing" element={<HeroSection />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
