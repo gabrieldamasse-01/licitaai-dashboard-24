@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX IF NOT EXISTS licitacoes_link_edital_unique ON public.licitacoes (link_edital) WHERE link_edital IS NOT NULL;
