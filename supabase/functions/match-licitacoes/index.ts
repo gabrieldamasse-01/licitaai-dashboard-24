@@ -119,18 +119,45 @@ serve(async (req: Request) => {
       let bestScore = 0;
       let bestEmpresa = empresaKeywords[0];
 
+      // Build expanded keyword set from setor
+      const SETOR_KEYWORDS: Record<string, string[]> = {
+        "tecnologia da informação": ["software", "sistema", "informática", "computador", "rede", "servidor", "ti", "tecnologia", "digital", "dados", "cloud", "nuvem", "suporte técnico", "desenvolvimento", "programação", "licença", "hardware", "equipamento de informática", "notebook", "desktop", "monitor", "impressora", "storage", "backup", "segurança da informação", "firewall", "switch", "roteador", "cabeamento", "infraestrutura"],
+        "saúde": ["medicamento", "hospitalar", "saúde", "médico", "clínica", "laboratório", "farmácia", "insumo"],
+        "construção": ["obra", "construção", "reforma", "pavimentação", "engenharia", "edificação", "predial"],
+        "alimentação": ["alimentação", "refeição", "alimento", "merenda", "nutrição"],
+        "limpeza": ["limpeza", "higienização", "conservação", "zeladoria"],
+        "transporte": ["veículo", "transporte", "frota", "locação de veículo", "combustível"],
+      };
+
       for (const emp of empresaKeywords) {
         let score = 0;
         const setorLower = emp.setor.toLowerCase();
         const cnaeLower = emp.cnae.toLowerCase();
         const nomeLower = emp.nome.toLowerCase();
 
-        // Check setor match in objeto
+        // Check setor match in objeto (direct)
         if (setorLower && objeto.includes(setorLower)) score += 30;
+
+        // Check expanded setor keywords
+        const expandedKeys = Object.entries(SETOR_KEYWORDS).find(([key]) => setorLower.includes(key));
+        if (expandedKeys) {
+          for (const kw of expandedKeys[1]) {
+            if (objeto.includes(kw)) {
+              score += 15;
+              break; // Only count once per keyword group match
+            }
+          }
+          // Additional points for multiple keyword matches
+          let kwMatches = 0;
+          for (const kw of expandedKeys[1]) {
+            if (objeto.includes(kw)) kwMatches++;
+          }
+          if (kwMatches > 1) score += Math.min(kwMatches * 5, 20);
+        }
 
         // Check CNAE keywords match
         if (cnaeLower) {
-          const cnaeWords = cnaeLower.split(/[\s,;]+/).filter((w: string) => w.length > 3);
+          const cnaeWords = cnaeLower.split(/[\s,;.\-/]+/).filter((w: string) => w.length > 3);
           for (const word of cnaeWords) {
             if (objeto.includes(word)) score += 10;
           }
@@ -142,15 +169,21 @@ serve(async (req: Request) => {
         // Check palavras encontradas vs setor/cnae
         for (const p of palavras) {
           if (setorLower.includes(p) || cnaeLower.includes(p)) score += 8;
+          // Also check expanded keywords
+          if (expandedKeys) {
+            for (const kw of expandedKeys[1]) {
+              if (p.includes(kw) || kw.includes(p)) { score += 5; break; }
+            }
+          }
         }
 
-        // Valor bonus (higher value = more interesting)
+        // Valor bonus
         if (valor > 100000) score += 5;
         if (valor > 500000) score += 5;
         if (valor > 1000000) score += 5;
 
         // SRP bonus
-        if (lic.srp === 1) score += 5;
+        if (lic.srp === 1) score += 3;
 
         score = Math.min(score, 100);
 
@@ -160,7 +193,7 @@ serve(async (req: Request) => {
         }
       }
 
-      // Only save if score is meaningful (> 20)
+      // Save if score is > 10 (lower threshold for more results)
       if (bestScore > 20) {
         // If AI key available, refine score with AI for high potential matches
         if (AI_API_KEY && bestScore > 40) {
